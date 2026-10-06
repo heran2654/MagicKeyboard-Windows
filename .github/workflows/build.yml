@@ -1,0 +1,38 @@
+name: Build and test source
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  x64:
+    runs-on: windows-2022
+    steps:
+      - uses: actions/checkout@v4
+      - name: Fetch pinned SDK and WDK packages
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $hashes=@{
+            'microsoft.windows.sdk.cpp'='B4730A467A8F29145FC0136B2B3F626767E985F6AA6E32F1352953C38D6FF5D2'
+            'microsoft.windows.sdk.cpp.x64'='7670843DDEE568CA1E89B0FEB36046EDE6A3DF5DBF5FA0106EC2EEE9E8224E38'
+            'microsoft.windows.wdk.x64'='247B2919AE451F65BA5F1CD51C7C39730FB0FC383D607F3E8AB317FDDC8A8239'
+          }
+          foreach($id in $hashes.Keys) {
+            $version='10.0.26100.1'
+            $url="https://api.nuget.org/v3-flatcontainer/$id/$version/$id.$version.nupkg"
+            $zip=Join-Path $env:RUNNER_TEMP "$id.zip"
+            Invoke-WebRequest $url -OutFile $zip
+            if((Get-FileHash -LiteralPath $zip -Algorithm SHA256).Hash -ne $hashes[$id]){throw "NuGet checksum mismatch: $id"}
+            Expand-Archive -LiteralPath $zip -DestinationPath (Join-Path $env:RUNNER_TEMP $id)
+          }
+      - name: Run report, action and production lifecycle tests
+        shell: pwsh
+        run: |
+          ./scripts/Test.ps1 -WindowsSdkRoot "$env:RUNNER_TEMP/microsoft.windows.sdk.cpp/c" -WindowsSdkLibRoot "$env:RUNNER_TEMP/microsoft.windows.sdk.cpp.x64/c" -WdkRoot "$env:RUNNER_TEMP/microsoft.windows.wdk.x64/c"
+      - name: Build unsigned development driver
+        shell: pwsh
+        run: |
+          ./scripts/Build.ps1 -WindowsSdkRoot "$env:RUNNER_TEMP/microsoft.windows.sdk.cpp/c" -WindowsSdkLibRoot "$env:RUNNER_TEMP/microsoft.windows.sdk.cpp.x64/c" -WdkRoot "$env:RUNNER_TEMP/microsoft.windows.wdk.x64/c"
